@@ -79,7 +79,8 @@ class HttpNtlmAuth(Auth):
         # request = request.copy()
         # ntlm returns the headers as a base64 encoded bytestring. Convert to
         # a string.
-        client = spnego.client(self.username, self.password, protocol="ntlm")
+        client = spnego.client(self.username, self.password, protocol="ntlm",
+                               options=spnego.NegotiateOptions.use_ntlm)
         # Perform the first step of the NTLM authentication
         negotiate_message = base64.b64encode(client.step()).decode("ascii")
 
@@ -93,8 +94,22 @@ class HttpNtlmAuth(Auth):
 
         # this is important for some web applications that store
         # authentication-related info in cookies (it took a long time to figure out)
-        if response2.headers.get("set-cookie"):
-            request.headers["Cookie"] = response2.headers.get("set-cookie")
+        # The original code was naively copying the Set-Cookie header from the
+        # intermediate 401 response directly into the Cookie header of the next
+        # request. This includes attributes like Path, HttpOnly, etc., which
+        # are invalid in a Cookie header. If the server (or a load balancer in
+        # front of it) relies on session affinity cookies to route the NTLM
+        # handshake to the same backend node, sending a malformed cookie will
+        # cause the request to be routed to a new node, which will reject the
+        # final NTLM message with a 401.
+        set_cookies = response2.headers.get_list("set-cookie")
+        if set_cookies:
+            original_cookies = request.headers.get("Cookie")
+            cookie_parts = (set(original_cookies.split("; "))
+                            if original_cookies else set())
+            for sc in set_cookies:
+                cookie_parts.add(sc.split(';', 1)[0])
+            request.headers["Cookie"] = "; ".join(cookie_parts)
 
         # get the challenge
         auth_header_value = response2.headers[resp_header]
