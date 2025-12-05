@@ -32,7 +32,7 @@ NTLM challenge-response.
 Installation
 ------------
 
-    pip install httpx-ntlm
+    pip install httpx-ntlm-fixed
 
 Requirements
 ------------
